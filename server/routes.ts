@@ -42,16 +42,30 @@ export async function registerRoutes(
     socket.emit('connection_confirmed', { user_id: userId, user_name: PREDEFINED_USERS[userId as keyof typeof PREDEFINED_USERS]?.name || userId });
     socket.emit('users_list', { current_user: userId, users: PREDEFINED_USERS });
 
-    const manager = users[userId]?.clientManager;
-    if (manager && manager.qrCodeData) {
-      import('qrcode').then(qrcode => {
-        qrcode.default.toDataURL(manager.qrCodeData!).then(qr => {
+    const sendCurrentQR = async () => {
+      const manager = users[userId]?.clientManager;
+      if (manager && manager.qrCodeData) {
+        try {
+          const qrcode = await import('qrcode');
+          const qr = await qrcode.default.toDataURL(manager.qrCodeData);
           socket.emit('qr_code', { qr });
-        });
-      });
-    }
+          socket.emit('connection_status', { status: 'connecting' });
+          console.log(`[Socket] Sent current QR to user ${userId}`);
+        } catch (err) {
+          console.error(`[Socket] Error sending QR to user ${userId}:`, err);
+        }
+      } else if (manager && manager.connectionState === 'connecting') {
+        console.log(`[Socket] Manager connecting for ${userId} but no QR yet`);
+        socket.emit('connection_status', { status: 'connecting' });
+      }
+    };
+    
+    // Send QR immediately on connection and also set an interval for safety
+    sendCurrentQR();
+    const qrInterval = setInterval(sendCurrentQR, 5000);
 
     socket.on('switch_user', (data) => {
+      clearInterval(qrInterval);
       const newUserId = data.userId;
       socket.leave(userId);
       socket.join(newUserId);
@@ -97,20 +111,36 @@ export async function registerRoutes(
     });
   });
 
-  app.post(api.connect.path, (req, res) => {
+  app.post(api.connect.path, async (req, res) => {
     const userId = getUserId(req);
     const { method, phoneNumber } = api.connect.input.parse(req.body);
 
     if (!users[userId]) {
       users[userId] = { clientManager: null, is_running: false, stats: { sent: 0, errors: 0 } };
     }
-    if (!users[userId].clientManager) {
-      const manager = new WhatsAppClientManager(userId, io);
-      users[userId].clientManager = manager;
-      manager.connect(method as any, phoneNumber);
-    } else {
-      users[userId].clientManager.connect(method as any, phoneNumber);
+    
+    // Clear existing session if starting a new connection attempt to avoid 405/conflicts
+    const sessionDir = path.join(process.cwd(), 'sessions', userId);
+    if (users[userId].clientManager) {
+      users[userId].clientManager.stop();
+      users[userId].clientManager = null;
+      // Wait a bit for the socket to close
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
+    
+    if (fs.existsSync(sessionDir)) {
+      try {
+        fs.removeSync(sessionDir);
+        console.log(`[WhatsApp] Cleared session directory for ${userId} before new connect`);
+      } catch (e) {
+        console.error(`[WhatsApp] Failed to clear session dir for ${userId}:`, e);
+      }
+    }
+
+    const manager = new WhatsAppClientManager(userId, io);
+    users[userId].clientManager = manager;
+    manager.connect(method as any, phoneNumber);
+    
     res.json({ success: true, message: 'جاري الاتصال...' });
   });
 

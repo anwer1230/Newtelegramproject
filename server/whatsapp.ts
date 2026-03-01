@@ -124,8 +124,36 @@ export class WhatsAppClientManager {
     this.sock = makeWASocket({
       auth: state,
       printQRInTerminal: false,
-      browser: Browsers.macOS('Desktop'),
+      browser: ["Chrome (Linux)", "Chrome", "110.0.5481.177"],
       syncFullHistory: false,
+      connectTimeoutMs: 60000,
+      defaultQueryTimeoutMs: 60000,
+      keepAliveIntervalMs: 10000,
+      generateHighQualityLinkPreview: false,
+      options: {
+        timeout: 60000,
+      },
+      patchMessageBeforeSending: (message) => {
+        const requiresPatch = !!(
+          message.buttonsMessage ||
+          message.templateMessage ||
+          message.listMessage
+        );
+        if (requiresPatch) {
+          message = {
+            viewOnceMessage: {
+              message: {
+                messageContextInfo: {
+                  deviceListMetadata: {},
+                  deviceListMetadataVersion: 2,
+                },
+                ...message,
+              },
+            },
+          };
+        }
+        return message;
+      },
     });
 
     // Handle pairing code request if method is phone
@@ -147,18 +175,37 @@ export class WhatsAppClientManager {
       
       if (qr && method === 'qr') {
         this.qrCodeData = qr;
-        const qrImage = await qrcode.toDataURL(qr);
-        console.log(`[WhatsApp] QR generated for user ${this.userId}`);
-        this.io.to(this.userId).emit('qr_code', { qr: qrImage });
+        try {
+          const qrcode = await import('qrcode');
+          const qrImage = await qrcode.default.toDataURL(qr);
+          console.log(`[WhatsApp] QR generated for user ${this.userId}`);
+          this.io.to(this.userId).emit('qr_code', { qr: qrImage });
+        } catch (err) {
+          console.error(`[WhatsApp] Error generating QR data URL for ${this.userId}:`, err);
+        }
       }
 
       if (connection === 'close') {
-        const statusCode = (lastDisconnect?.error?.output?.statusCode);
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+        const statusCode = (lastDisconnect?.error as any)?.output?.statusCode || (lastDisconnect?.error as any)?.statusCode;
+        const shouldReconnect = statusCode !== DisconnectReason.loggedOut && statusCode !== 401 && statusCode !== 403;
         console.log(`[WhatsApp] Connection closed for ${this.userId}. Status: ${statusCode}. Reconnecting: ${shouldReconnect}`);
         
+        if (statusCode === 401 || statusCode === 403 || statusCode === 419) {
+           const sessionDir = path.join(SESSIONS_DIR, this.userId);
+           if (fs.existsSync(sessionDir)) {
+             try {
+               fs.removeSync(sessionDir);
+               console.log(`[WhatsApp] Session cleared for ${this.userId} due to auth error ${statusCode}`);
+             } catch (e) {
+               console.error(`[WhatsApp] Failed to clear session for ${this.userId}:`, e);
+             }
+           }
+        }
+
         this.connectionState = 'disconnected';
         this.qrCodeData = null;
+        this.io.to(this.userId).emit('qr_code', { qr: null });
+        this.io.to(this.userId).emit('pairing_code', { code: null });
         this.io.to(this.userId).emit('connection_status', { status: 'disconnected' });
         this.io.to(this.userId).emit('login_status', {
           logged_in: false, 
@@ -169,7 +216,7 @@ export class WhatsAppClientManager {
         });
 
         if (shouldReconnect && !this.stopFlag) {
-          this.connect();
+          this.connect(method, phoneNumber);
         }
       } else if (connection === 'open') {
         console.log(`[WhatsApp] Connection opened for ${this.userId}`);

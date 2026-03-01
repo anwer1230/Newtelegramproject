@@ -12,7 +12,7 @@ export default function Dashboard() {
   const [connectMethod, setConnectMethod] = useState<'qr' | 'phone'>('qr');
   const [phoneNumber, setPhoneNumber] = useState<string>('');
   const [showPhoneInput, setShowPhoneInput] = useState(false);
-  
+
   // Update active user when initData loads
   useEffect(() => {
     if (initData?.currentUser?.id) {
@@ -21,11 +21,21 @@ export default function Dashboard() {
   }, [initData]);
 
   const { state: socketState, startMonitoring, stopMonitoring, switchUserSocket, clearLogs } = useSocket(activeUserId);
-  
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (socketState.connectionStatus !== 'connected' && !socketState.qrCode && !socketState.pairingCode) {
+      interval = setInterval(() => {
+        // Force a small state update or check if needed
+      }, 5000);
+    }
+    return () => clearInterval(interval);
+  }, [socketState.connectionStatus, socketState.qrCode, socketState.pairingCode]);
+
   const connectMutation = useConnect();
   const logoutMutation = useLogout();
   const switchMutation = useSwitchUser();
-  
+
   const handleSwitchUser = (userId: string) => {
     setActiveUserId(userId);
     switchMutation.mutate(userId, {
