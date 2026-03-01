@@ -124,12 +124,13 @@ export class WhatsAppClientManager {
     this.sock = makeWASocket({
       auth: state,
       printQRInTerminal: false,
-      browser: ["Chrome (Linux)", "Chrome", "110.0.5481.177"],
+      browser: ["Ubuntu", "Chrome", "20.0.04"],
       syncFullHistory: false,
       connectTimeoutMs: 60000,
       defaultQueryTimeoutMs: 60000,
       keepAliveIntervalMs: 10000,
       generateHighQualityLinkPreview: false,
+      markOnlineOnConnect: true,
       options: {
         timeout: 60000,
       },
@@ -166,8 +167,9 @@ export class WhatsAppClientManager {
           console.log(`[WhatsApp] Pairing code generated for ${this.userId}: ${formattedCode}`);
         } catch (err) {
           console.error(`[WhatsApp] Error generating pairing code for ${this.userId}:`, err);
+          this.io.to(this.userId).emit('log_update', { message: '❌ فشل طلب رمز الربط. تأكد من الرقم وحاول مجدداً' });
         }
-      }, 3000);
+      }, 5000);
     }
 
     this.sock.ev.on('connection.update', async (update: any) => {
@@ -178,8 +180,8 @@ export class WhatsAppClientManager {
         try {
           const qrcode = await import('qrcode');
           const qrImage = await qrcode.default.toDataURL(qr);
-          console.log(`[WhatsApp] QR generated for user ${this.userId}`);
           this.io.to(this.userId).emit('qr_code', { qr: qrImage });
+          this.io.to(this.userId).emit('connection_status', { status: 'connecting' });
         } catch (err) {
           console.error(`[WhatsApp] Error generating QR data URL for ${this.userId}:`, err);
         }
@@ -187,15 +189,15 @@ export class WhatsAppClientManager {
 
       if (connection === 'close') {
         const statusCode = (lastDisconnect?.error as any)?.output?.statusCode || (lastDisconnect?.error as any)?.statusCode;
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut && statusCode !== 401 && statusCode !== 403;
+        const shouldReconnect = statusCode !== DisconnectReason.loggedOut && statusCode !== 401 && statusCode !== 403 && statusCode !== 405;
         console.log(`[WhatsApp] Connection closed for ${this.userId}. Status: ${statusCode}. Reconnecting: ${shouldReconnect}`);
         
-        if (statusCode === 401 || statusCode === 403 || statusCode === 419) {
+        if (statusCode === 401 || statusCode === 403 || statusCode === 419 || statusCode === 405) {
            const sessionDir = path.join(SESSIONS_DIR, this.userId);
            if (fs.existsSync(sessionDir)) {
              try {
                fs.removeSync(sessionDir);
-               console.log(`[WhatsApp] Session cleared for ${this.userId} due to auth error ${statusCode}`);
+               console.log(`[WhatsApp] Session cleared for ${this.userId} due to error ${statusCode}`);
              } catch (e) {
                console.error(`[WhatsApp] Failed to clear session for ${this.userId}:`, e);
              }

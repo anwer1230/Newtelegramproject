@@ -5,7 +5,8 @@ import { storage } from "./storage";
 import { api } from "@shared/routes";
 import { z } from "zod";
 import * as path from 'path';
-import * as fs from 'fs-extra';
+import fs from 'fs-extra';
+const { existsSync, removeSync, ensureDirSync, writeFileSync, unlink, remove } = fs;
 import {
   PREDEFINED_USERS,
   users,
@@ -50,13 +51,14 @@ export async function registerRoutes(
           const qr = await qrcode.default.toDataURL(manager.qrCodeData);
           socket.emit('qr_code', { qr });
           socket.emit('connection_status', { status: 'connecting' });
-          console.log(`[Socket] Sent current QR to user ${userId}`);
+          // console.log(`[Socket] Sent current QR to user ${userId}`);
         } catch (err) {
           console.error(`[Socket] Error sending QR to user ${userId}:`, err);
         }
       } else if (manager && manager.connectionState === 'connecting') {
-        console.log(`[Socket] Manager connecting for ${userId} but no QR yet`);
         socket.emit('connection_status', { status: 'connecting' });
+      } else if (manager && manager.connectionState === 'connected') {
+        socket.emit('connection_status', { status: 'connected' });
       }
     };
     
@@ -119,18 +121,21 @@ export async function registerRoutes(
       users[userId] = { clientManager: null, is_running: false, stats: { sent: 0, errors: 0 } };
     }
     
-    // Clear existing session if starting a new connection attempt to avoid 405/conflicts
     const sessionDir = path.join(process.cwd(), 'sessions', userId);
     if (users[userId].clientManager) {
-      users[userId].clientManager.stop();
+      try {
+        users[userId].clientManager.stop();
+      } catch (e) {
+        console.error(`[WhatsApp] Error stopping manager for ${userId}:`, e);
+      }
       users[userId].clientManager = null;
       // Wait a bit for the socket to close
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 1500));
     }
     
-    if (fs.existsSync(sessionDir)) {
+    if (existsSync(sessionDir)) {
       try {
-        fs.removeSync(sessionDir);
+        removeSync(sessionDir);
         console.log(`[WhatsApp] Cleared session directory for ${userId} before new connect`);
       } catch (e) {
         console.error(`[WhatsApp] Failed to clear session dir for ${userId}:`, e);
@@ -151,7 +156,7 @@ export async function registerRoutes(
       users[userId].clientManager = null;
     }
     const sessionDir = path.join(process.cwd(), 'sessions', userId);
-    await fs.remove(sessionDir);
+    await remove(sessionDir);
     io.to(userId).emit('connection_status', { status: 'disconnected' });
     io.to(userId).emit('login_status', { logged_in: false, connected: false, awaiting_code: false, awaiting_password: false, is_running: false });
     res.json({ success: true, message: 'تم تسجيل الخروج' });
@@ -201,7 +206,7 @@ export async function registerRoutes(
     }
 
     const tempDir = path.join(process.cwd(), 'temp', userId);
-    fs.ensureDirSync(tempDir);
+    ensureDirSync(tempDir);
     const imagePaths: string[] = [];
     try {
       for (const img of images) {
@@ -209,7 +214,7 @@ export async function registerRoutes(
         const buffer = Buffer.from(base64Data, 'base64');
         const ext = img.type.split('/')[1] || 'jpg';
         const tempFile = path.join(tempDir, `${Date.now()}-${Math.random()}.${ext}`);
-        fs.writeFileSync(tempFile, buffer);
+        writeFileSync(tempFile, buffer);
         imagePaths.push(tempFile);
       }
     } catch (err) {
@@ -243,7 +248,7 @@ export async function registerRoutes(
         await new Promise(resolve => setTimeout(resolve, 3000));
       }
       for (const f of imagePaths) {
-        fs.unlink(f).catch(() => {});
+        unlink(f).catch(() => {});
       }
       io.to(userId).emit('log_update', { message: `📊 انتهى الإرسال: ✅ ${success} نجح | ❌ ${fail} فشل` });
     })();

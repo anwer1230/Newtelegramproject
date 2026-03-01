@@ -13,6 +13,12 @@ export default function Dashboard() {
   const [phoneNumber, setPhoneNumber] = useState<string>('');
   const [showPhoneInput, setShowPhoneInput] = useState(false);
 
+  const { state: socketState, startMonitoring, stopMonitoring, switchUserSocket, clearLogs } = useSocket(activeUserId);
+
+  const connectMutation = useConnect();
+  const logoutMutation = useLogout();
+  const switchMutation = useSwitchUser();
+
   // Update active user when initData loads
   useEffect(() => {
     if (initData?.currentUser?.id) {
@@ -20,21 +26,15 @@ export default function Dashboard() {
     }
   }, [initData]);
 
-  const { state: socketState, startMonitoring, stopMonitoring, switchUserSocket, clearLogs } = useSocket(activeUserId);
-
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    let interval: any;
     if (socketState.connectionStatus !== 'connected' && !socketState.qrCode && !socketState.pairingCode) {
       interval = setInterval(() => {
-        // Force a small state update or check if needed
+        // Force check if needed
       }, 5000);
     }
     return () => clearInterval(interval);
   }, [socketState.connectionStatus, socketState.qrCode, socketState.pairingCode]);
-
-  const connectMutation = useConnect();
-  const logoutMutation = useLogout();
-  const switchMutation = useSwitchUser();
 
   const handleSwitchUser = (userId: string) => {
     setActiveUserId(userId);
@@ -56,6 +56,19 @@ export default function Dashboard() {
 
   const predefinedUsers = initData?.predefinedUsers || {};
   const currentSettings = initData?.settings || {};
+
+  const handleConnect = () => {
+    if (connectMethod === 'phone' && !phoneNumber) return;
+    connectMutation.mutate({ method: connectMethod, phoneNumber });
+  };
+
+  const handleLogout = () => {
+    logoutMutation.mutate(undefined, {
+      onSuccess: () => {
+        setShowPhoneInput(false);
+      }
+    });
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground p-4 md:p-6 lg:p-8 selection:bg-primary/20">
@@ -171,8 +184,9 @@ export default function Dashboard() {
                     onClick={() => connectMutation.mutate({ method: 'qr' })} 
                     disabled={connectMutation.isPending || socketState.connectionStatus === 'connecting'}
                     className="w-full"
+                    data-testid="button-connect-qr"
                   >
-                    {socketState.connectionStatus === 'connecting' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Smartphone className="w-4 h-4 ms-2" />}
+                    {socketState.connectionStatus === 'connecting' && !socketState.pairingCode ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Smartphone className="w-4 h-4 ms-2" />}
                     ربط عبر رمز QR
                   </Button>
                   <Button 
@@ -186,20 +200,17 @@ export default function Dashboard() {
                 </>
               )}
               
-              {(socketState.connectionStatus === 'connected' || socketState.pairingCode) && (
-                <Button 
-                  variant="destructive" 
-                  onClick={() => {
-                    logoutMutation.mutate();
-                    setShowPhoneInput(false);
-                  }}
-                  disabled={logoutMutation.isPending}
-                  className="w-full"
-                >
-                  <LogOut className="w-4 h-4 ms-2" />
-                  {socketState.connectionStatus === 'connected' ? 'تسجيل الخروج' : 'إلغاء وطلب رمز جديد'}
-                </Button>
-              )}
+                {(socketState.connectionStatus === 'connected' || socketState.pairingCode) && (
+                  <Button 
+                    variant="destructive" 
+                    onClick={handleLogout}
+                    disabled={logoutMutation.isPending}
+                    className="w-full"
+                  >
+                    <LogOut className="w-4 h-4 ms-2" />
+                    {socketState.connectionStatus === 'connected' ? 'تسجيل الخروج' : 'إلغاء وطلب رمز جديد'}
+                  </Button>
+                )}
             </CardFooter>
           </Card>
 
