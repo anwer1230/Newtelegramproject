@@ -1,38 +1,27 @@
-import { type User, type InsertUser } from "@shared/schema";
-import { randomUUID } from "crypto";
-
-// modify the interface with any CRUD methods
-// you might need
+import { db } from "./db";
+import { settings, type Settings, type InsertSettings } from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 export interface IStorage {
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
+  getSettings(userId: string): Promise<Settings | undefined>;
+  updateSettings(userId: string, update: Partial<InsertSettings>): Promise<Settings>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<string, User>;
-
-  constructor() {
-    this.users = new Map();
+export class DatabaseStorage implements IStorage {
+  async getSettings(userId: string): Promise<Settings | undefined> {
+    const [result] = await db.select().from(settings).where(eq(settings.userId, userId));
+    return result;
   }
 
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
-  }
-
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
-  }
-
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
-    return user;
+  async updateSettings(userId: string, update: Partial<InsertSettings>): Promise<Settings> {
+    const existing = await this.getSettings(userId);
+    if (!existing) {
+      const [inserted] = await db.insert(settings).values({ userId, ...update }).returning();
+      return inserted;
+    }
+    const [updated] = await db.update(settings).set(update).where(eq(settings.userId, userId)).returning();
+    return updated;
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
