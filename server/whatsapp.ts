@@ -1,12 +1,13 @@
 import { default as makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers } from '@whiskeysockets/baileys';
-import * as fs from 'fs-extra';
+import fs from 'fs-extra';
+const { existsSync, removeSync, ensureDirSync } = fs;
 import * as path from 'path';
 import qrcode from 'qrcode';
 import { Server } from 'socket.io';
 import { storage } from './storage';
 
 const SESSIONS_DIR = path.join(process.cwd(), 'sessions');
-fs.ensureDirSync(SESSIONS_DIR);
+ensureDirSync(SESSIONS_DIR);
 
 export const PREDEFINED_USERS = {
   user_1: { id: 'user_1', name: 'المستخدم الأول' },
@@ -117,7 +118,7 @@ export class WhatsAppClientManager {
   async connect(method: 'qr' | 'phone' = 'qr', phoneNumber?: string) {
     this.connectionState = 'connecting';
     const sessionDir = path.join(SESSIONS_DIR, this.userId);
-    fs.ensureDirSync(sessionDir);
+    ensureDirSync(sessionDir);
 
     const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
 
@@ -194,9 +195,9 @@ export class WhatsAppClientManager {
         
         if (statusCode === 401 || statusCode === 403 || statusCode === 419 || statusCode === 405) {
            const sessionDir = path.join(SESSIONS_DIR, this.userId);
-           if (fs.existsSync(sessionDir)) {
+           if (existsSync(sessionDir)) {
              try {
-               fs.removeSync(sessionDir);
+               removeSync(sessionDir);
                console.log(`[WhatsApp] Session cleared for ${this.userId} due to error ${statusCode}`);
              } catch (e) {
                console.error(`[WhatsApp] Failed to clear session for ${this.userId}:`, e);
